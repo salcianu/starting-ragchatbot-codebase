@@ -1,10 +1,12 @@
 """
-Characterization tests for DocumentProcessor.
+Tests for DocumentProcessor.
 
-These pin down the *current* behavior so that refactoring can be verified to
-leave the output unchanged. Tests marked "PINNED QUIRK" document behavior that
-is probably a bug; when it is fixed on purpose, update those tests (and the
-snapshots, via UPDATE_SNAPSHOTS=1) in the same change.
+Besides unit tests, golden snapshots of the real course documents pin down the
+full parsing and chunking output, so any change to it shows up in review. After
+an intentional output change, regenerate them with UPDATE_SNAPSHOTS=1.
+
+Known bugs that are not fixed yet can be locked in by tests named
+"pinned_quirk"; update those on purpose, in the same change as the fix.
 """
 
 import json
