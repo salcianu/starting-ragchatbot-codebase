@@ -123,7 +123,7 @@ class DocumentProcessor:
                 prefix=f"Course {course.title} Lesson {lesson_number} content: "))
 
         # If no lessons found, treat entire content as one document
-        if not course_chunks and len(lines) > 2:
+        if not course_chunks:
             remaining_content = '\n'.join(lines[body_start:]).strip()
             course_chunks = self._make_chunks(remaining_content, course.title, None, first_index=0)
 
@@ -144,15 +144,20 @@ class DocumentProcessor:
             title_match = COURSE_TITLE.match(first_line)
             course_title = title_match.group(1).strip() if title_match else first_line
 
-        # Lines 1-3 may hold the course link and the instructor, in any order
+        # The course link and instructor follow the title, in any order and
+        # possibly with blank lines; the body starts at the first other line
         course_link = None
         instructor_name = None
-        for line in lines[1:4]:
-            line = line.strip()
+        body_start = 1
+        while body_start < len(lines):
+            line = lines[body_start].strip()
             if link_match := COURSE_LINK.match(line):
                 course_link = link_match.group(1).strip()
             elif instructor_match := COURSE_INSTRUCTOR.match(line):
                 instructor_name = instructor_match.group(1).strip()
+            elif line:
+                break
+            body_start += 1
 
         # Create course object with title as ID; an instructor given
         # literally as "Unknown" is treated as missing
@@ -161,13 +166,6 @@ class DocumentProcessor:
             course_link=course_link,
             instructor=None if instructor_name == "Unknown" else instructor_name
         )
-
-        # The body is assumed to start at line 4 (after metadata), regardless
-        # of how many header lines were actually found
-        body_start = 3
-        if len(lines) > 3 and not lines[3].strip():
-            body_start = 4  # Skip empty line after instructor
-
         return course, body_start
 
     @staticmethod
