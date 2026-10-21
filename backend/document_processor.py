@@ -71,37 +71,21 @@ class DocumentProcessor:
             count += 1
         return count
 
-    def _add_lesson(self, course: Course, course_chunks: List[CourseChunk], chunk_counter: int,
-                    lesson_number: Optional[int], lesson_title: Optional[str],
-                    lesson_link: Optional[str], lesson_content: List[str]) -> int:
+    def _make_chunks(self, text: str, course_title: str, lesson_number: Optional[int],
+                     first_index: int, prefix: str = "") -> List[CourseChunk]:
         """
-        Add a lesson to the course and append its chunks to course_chunks.
-        Every chunk is prefixed with the course title and lesson number.
-
-        Returns:
-            The updated chunk counter
+        Chunk text into CourseChunks, numbering them from first_index and
+        prepending prefix to each chunk's content.
         """
-        if lesson_number is None or not lesson_content:
-            return chunk_counter
-        lesson_text = '\n'.join(lesson_content).strip()
-        if not lesson_text:
-            return chunk_counter
-
-        course.lessons.append(Lesson(
-            lesson_number=lesson_number,
-            title=lesson_title,
-            lesson_link=lesson_link
-        ))
-
-        for chunk in self.chunk_text(lesson_text):
-            course_chunks.append(CourseChunk(
-                content=f"Course {course.title} Lesson {lesson_number} content: {chunk}",
-                course_title=course.title,
+        return [
+            CourseChunk(
+                content=prefix + chunk,
+                course_title=course_title,
                 lesson_number=lesson_number,
-                chunk_index=chunk_counter
-            ))
-            chunk_counter += 1
-        return chunk_counter
+                chunk_index=first_index + offset
+            )
+            for offset, chunk in enumerate(self.chunk_text(text))
+        ]
 
     def process_course_document(self, file_path: str) -> Tuple[Course, List[CourseChunk]]:
         """
@@ -116,25 +100,23 @@ class DocumentProcessor:
         course, body_start = self._parse_header(lines, fallback_title=os.path.basename(file_path))
 
         course_chunks = []
-        chunk_counter = 0
         for lesson_number, lesson_title, lesson_link, lesson_content in self._split_lessons(lines, body_start):
-            chunk_counter = self._add_lesson(course, course_chunks, chunk_counter,
-                                             lesson_number, lesson_title, lesson_link,
-                                             lesson_content)
+            lesson_text = '\n'.join(lesson_content).strip()
+            if not lesson_text:
+                continue  # Lessons without content are dropped
+            course.lessons.append(Lesson(
+                lesson_number=lesson_number,
+                title=lesson_title,
+                lesson_link=lesson_link
+            ))
+            course_chunks.extend(self._make_chunks(
+                lesson_text, course.title, lesson_number, first_index=len(course_chunks),
+                prefix=f"Course {course.title} Lesson {lesson_number} content: "))
 
         # If no lessons found, treat entire content as one document
         if not course_chunks and len(lines) > 2:
             remaining_content = '\n'.join(lines[body_start:]).strip()
-            if remaining_content:
-                chunks = self.chunk_text(remaining_content)
-                for chunk in chunks:
-                    course_chunk = CourseChunk(
-                        content=chunk,
-                        course_title=course.title,
-                        chunk_index=chunk_counter
-                    )
-                    course_chunks.append(course_chunk)
-                    chunk_counter += 1
+            course_chunks = self._make_chunks(remaining_content, course.title, None, first_index=0)
 
         return course, course_chunks
 
