@@ -125,7 +125,8 @@ class DocumentProcessor:
         # If no lessons found, treat entire content as one document
         if not course_chunks:
             remaining_content = '\n'.join(lines[body_start:]).strip()
-            course_chunks = self._make_chunks(remaining_content, course.title, None, first_index=0)
+            course_chunks = self._make_chunks(remaining_content, course.title, None, first_index=0,
+                                              prefix=f"Course {course.title} content: ")
 
         return course, course_chunks
 
