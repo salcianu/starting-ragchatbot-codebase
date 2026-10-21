@@ -13,7 +13,11 @@ A RAG chatbot that answers questions about course materials. It is a FastAPI bac
 - Run: `./run.sh`, or `cd backend && uv run uvicorn app:app --reload --port 8000`
   - Web UI: http://localhost:8000. API docs: http://localhost:8000/docs
 
-The repo has no test suite, linter or build step. The root `main.py` is an unused placeholder.
+- Tests (pytest is a dev dependency; config lives in `pyproject.toml`): run `uv run pytest` from the repo root. For a single test: `uv run pytest backend/tests/test_document_processor.py::TestChunkText::test_whitespace_is_normalized`
+  - `backend/tests/test_document_processor.py` holds characterization tests. Tests named `pinned_quirk` lock in current behavior that is probably a bug. Update them on purpose when fixing that behavior.
+  - Golden snapshots of the parsed `docs/*.txt` are stored in `backend/tests/snapshots/`. After an *intentional* change to parsing or chunking output, regenerate them with `UPDATE_SNAPSHOTS=1 uv run pytest`.
+
+The repo has no linter or build step. The root `main.py` is an unused placeholder.
 
 **Run the server from inside `backend/`.** The code uses paths relative to the working directory: `../docs` for documents, `../frontend` for static files, and `./chroma_db` for the vector DB (so the DB lives at `backend/chroma_db`).
 

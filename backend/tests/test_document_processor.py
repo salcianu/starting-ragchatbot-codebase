@@ -1,0 +1,265 @@
+"""
+Characterization tests for DocumentProcessor.
+
+These pin down the *current* behavior so that refactoring can be verified to
+leave the output unchanged. Tests marked "PINNED QUIRK" document behavior that
+is probably a bug; when it is fixed on purpose, update those tests (and the
+snapshots, via UPDATE_SNAPSHOTS=1) in the same change.
+"""
+
+import json
+import os
+from pathlib import Path
+
+import pytest
+
+from document_processor import DocumentProcessor
+
+DOCS_DIR = Path(__file__).resolve().parents[2] / "docs"
+SNAPSHOTS_DIR = Path(__file__).resolve().parent / "snapshots"
+
+
+def write_doc(tmp_path: Path, text: str, name: str = "course.txt") -> str:
+    path = tmp_path / name
+    path.write_text(text, encoding="utf-8")
+    return str(path)
+
+
+# ---------------------------------------------------------------------------
+# chunk_text
+# ---------------------------------------------------------------------------
+
+class TestChunkText:
+
+    def test_empty_and_whitespace_only_text(self):
+        dp = DocumentProcessor(50, 10)
+        assert dp.chunk_text("") == []
+        assert dp.chunk_text("   \n\t  ") == []
+
+    def test_whitespace_is_normalized(self):
+        dp = DocumentProcessor(1000, 0)
+        assert dp.chunk_text("  Hello\n\n  world.\tNext   one.  ") == ["Hello world. Next one."]
+
+    def test_short_text_is_a_single_chunk(self):
+        dp = DocumentProcessor(1000, 0)
+        text = "First sentence. Second sentence. Third sentence."
+        assert dp.chunk_text(text) == [text]
+
+    def test_splits_only_at_sentence_boundaries(self):
+        # chunk_size=1 forces one sentence per chunk, exposing the sentence splitter:
+        # splits after . ! ? followed by a capital letter, but not after "Dr." or "e.g."
+        dp = DocumentProcessor(1, 0)
+        text = "First one. Second one! Third one? fourth lower. Dr. Smith came. See e.g. This."
+        assert dp.chunk_text(text) == [
+            "First one.",
+            "Second one!",
+            "Third one? fourth lower.",
+            "Dr. Smith came.",
+            "See e.g. This.",
+        ]
+
+    def test_sentence_longer_than_chunk_size_is_its_own_chunk(self):
+        dp = DocumentProcessor(10, 0)
+        assert dp.chunk_text("This sentence is way longer than ten. Short.") == [
+            "This sentence is way longer than ten.",
+            "Short.",
+        ]
+
+    def test_overlap_repeats_trailing_sentences(self):
+        # "Four five." (10 chars) fits in the 15-char overlap, so it starts the next chunk.
+        dp = DocumentProcessor(40, 15)
+        chunks = dp.chunk_text("One two three. Four five. Six seven eight. Nine ten.")
+        assert chunks[:2] == [
+            "One two three. Four five.",
+            "Four five. Six seven eight. Nine ten.",
+        ]
+
+    def test_pinned_quirk_redundant_tail_chunk(self):
+        # PINNED QUIRK: after the chunk that reaches the end of the text, the loop
+        # emits one more chunk made only of the overlap sentences, which are
+        # already contained in the previous chunk.
+        dp = DocumentProcessor(40, 15)
+        chunks = dp.chunk_text("One two three. Four five. Six seven eight. Nine ten.")
+        assert chunks == [
+            "One two three. Four five.",
+            "Four five. Six seven eight. Nine ten.",
+            "Nine ten.",
+        ]
+        assert DocumentProcessor(30, 12).chunk_text("Aa bb. Cc dd. Ee ff gg hh. Ii.") == [
+            "Aa bb. Cc dd. Ee ff gg hh. Ii.",
+            "Ii.",
+        ]
+        # Even a text far below chunk_size gets a tail chunk when its last
+        # sentence fits in the overlap...
+        assert DocumentProcessor(1000, 100).chunk_text("First sentence. Second sentence.") == [
+            "First sentence. Second sentence.",
+            "Second sentence.",
+        ]
+        # ...but a single-sentence text does not.
+        assert DocumentProcessor(1000, 100).chunk_text("Only one sentence.") == ["Only one sentence."]
+
+    def test_no_overlap_chunks_rejoin_to_original(self):
+        dp = DocumentProcessor(60, 0)
+        text = " ".join(f"Sentence number {i} is here." for i in range(20))
+        chunks = dp.chunk_text(text)
+        assert len(chunks) > 1
+        assert " ".join(chunks) == text
+
+    def test_chunks_respect_size_unless_single_sentence(self):
+        dp = DocumentProcessor(800, 100)
+        text = (DOCS_DIR / "course1_script.txt").read_text(encoding="utf-8")
+        splitter = DocumentProcessor(1, 0)  # one sentence per chunk
+        for chunk in dp.chunk_text(text):
+            assert len(chunk) <= 800 or len(splitter.chunk_text(chunk)) == 1
+
+
+# ---------------------------------------------------------------------------
+# read_file
+# ---------------------------------------------------------------------------
+
+def test_read_file_drops_invalid_utf8_bytes(tmp_path):
+    path = tmp_path / "bad.txt"
+    path.write_bytes(b"Course Title: Caf\xe9\n")
+    assert DocumentProcessor(800, 100).read_file(str(path)) == "Course Title: Caf\n"
+
+
+# ---------------------------------------------------------------------------
+# process_course_document
+# ---------------------------------------------------------------------------
+
+FULL_DOC = """Course Title: Test Course
+Course Link: https://example.com/course
+Course Instructor: Ada Lovelace
+
+Lesson 0: Introduction
+Lesson Link: https://example.com/lesson0
+Welcome to the course. This is the introduction.
+
+Lesson 1: Basics
+Lesson Link: https://example.com/lesson1
+Here we learn the basics. They are important.
+
+Lesson 2: Wrap-up
+Final words here.
+"""
+
+
+class TestProcessCourseDocument:
+
+    @pytest.fixture
+    def parsed(self, tmp_path):
+        # Overlap 0 keeps these tests focused on parsing; with overlap on, every
+        # multi-sentence lesson would also get a redundant tail chunk (see
+        # TestChunkText.test_pinned_quirk_redundant_tail_chunk).
+        return DocumentProcessor(800, 0).process_course_document(write_doc(tmp_path, FULL_DOC))
+
+    def test_header_is_parsed(self, parsed):
+        course, _ = parsed
+        assert course.title == "Test Course"
+        assert course.course_link == "https://example.com/course"
+        assert course.instructor == "Ada Lovelace"
+
+    def test_lessons_are_parsed(self, parsed):
+        course, _ = parsed
+        assert [(l.lesson_number, l.title, l.lesson_link) for l in course.lessons] == [
+            (0, "Introduction", "https://example.com/lesson0"),
+            (1, "Basics", "https://example.com/lesson1"),
+            (2, "Wrap-up", None),
+        ]
+
+    def test_chunks_are_prefixed_and_numbered(self, parsed):
+        _, chunks = parsed
+        assert [c.content for c in chunks] == [
+            "Course Test Course Lesson 0 content: Welcome to the course. This is the introduction.",
+            "Course Test Course Lesson 1 content: Here we learn the basics. They are important.",
+            "Course Test Course Lesson 2 content: Final words here.",
+        ]
+        assert [c.lesson_number for c in chunks] == [0, 1, 2]
+        assert [c.chunk_index for c in chunks] == [0, 1, 2]
+        assert all(c.course_title == "Test Course" for c in chunks)
+
+    def test_lesson_link_line_is_not_content(self, parsed):
+        _, chunks = parsed
+        assert not any("Lesson Link" in c.content or "example.com" in c.content for c in chunks)
+
+    def test_chunk_index_runs_across_lessons(self, tmp_path):
+        body = " ".join(f"Sentence {i} of the lesson." for i in range(30))
+        doc = f"Course Title: T\nCourse Link: L\nCourse Instructor: I\n\nLesson 1: A\n{body}\nLesson 2: B\n{body}\n"
+        _, chunks = DocumentProcessor(100, 20).process_course_document(write_doc(tmp_path, doc))
+        assert [c.chunk_index for c in chunks] == list(range(len(chunks)))
+        assert {c.lesson_number for c in chunks} == {1, 2}
+        assert all(c.content.startswith(f"Course T Lesson {c.lesson_number} content: ") for c in chunks)
+
+    def test_title_without_prefix_is_used_as_is(self, tmp_path):
+        course, chunks = DocumentProcessor(800, 100).process_course_document(
+            write_doc(tmp_path, "My Plain Title\n"))
+        assert course.title == "My Plain Title"
+        assert chunks == []
+
+    def test_empty_file_falls_back_to_filename(self, tmp_path):
+        course, chunks = DocumentProcessor(800, 100).process_course_document(
+            write_doc(tmp_path, "", name="empty_course.txt"))
+        assert course.title == "empty_course.txt"
+        assert course.course_link is None
+        assert course.instructor is None
+        assert course.lessons == []
+        assert chunks == []
+
+    def test_missing_instructor_is_none(self, tmp_path):
+        doc = "Course Title: T\nCourse Link: L\n\nLesson 1: A\nBody.\n"
+        course, _ = DocumentProcessor(800, 100).process_course_document(write_doc(tmp_path, doc))
+        assert course.course_link == "L"
+        assert course.instructor is None
+
+    def test_lesson_with_empty_body_is_dropped(self, tmp_path):
+        doc = ("Course Title: T\nCourse Link: L\nCourse Instructor: I\n\n"
+               "Lesson 1: Empty\n\nLesson 2: B\nLesson Link: http://b\nHello.\n")
+        course, chunks = DocumentProcessor(800, 100).process_course_document(write_doc(tmp_path, doc))
+        assert [l.lesson_number for l in course.lessons] == [2]
+        assert [c.content for c in chunks] == ["Course T Lesson 2 content: Hello."]
+
+    def test_pinned_quirk_no_lessons_fallback_has_no_prefix(self, tmp_path):
+        # PINNED QUIRK: without "Lesson N:" markers, chunks get no prefix and no
+        # lesson number (and also show the redundant tail chunk from chunk_text).
+        doc = "Course Title: T\nCourse Link: L\nCourse Instructor: I\n\nJust text. More text.\n"
+        course, chunks = DocumentProcessor(800, 100).process_course_document(write_doc(tmp_path, doc))
+        assert course.lessons == []
+        assert [(c.content, c.lesson_number, c.chunk_index) for c in chunks] == [
+            ("Just text. More text.", None, 0),
+            ("More text.", None, 1),
+        ]
+
+    def test_pinned_quirk_body_starts_at_fixed_line(self, tmp_path):
+        # PINNED QUIRK: the body is assumed to start at line index 3 (or 4 after a
+        # blank line), regardless of how many header lines there really are.
+        # With a 2-line header, the "Lesson 1: A" marker on line 2 is skipped,
+        # so the lesson is lost and its text goes through the no-lessons fallback.
+        doc = "Course Title: T\nCourse Instructor: I\nLesson 1: A\nBody one.\n"
+        course, chunks = DocumentProcessor(800, 100).process_course_document(write_doc(tmp_path, doc))
+        assert course.lessons == []
+        assert [(c.content, c.lesson_number) for c in chunks] == [("Body one.", None)]
+
+
+# ---------------------------------------------------------------------------
+# Golden snapshots of the real course documents
+# ---------------------------------------------------------------------------
+
+def serialize(course, chunks) -> dict:
+    return {
+        "course": course.model_dump(),
+        "chunks": [chunk.model_dump() for chunk in chunks],
+    }
+
+
+@pytest.mark.parametrize("doc_path", sorted(DOCS_DIR.glob("*.txt")), ids=lambda p: p.stem)
+def test_real_docs_match_snapshot(doc_path):
+    # Same settings as config.py (CHUNK_SIZE=800, CHUNK_OVERLAP=100).
+    actual = serialize(*DocumentProcessor(800, 100).process_course_document(str(doc_path)))
+    snapshot = SNAPSHOTS_DIR / f"{doc_path.stem}.json"
+
+    if os.environ.get("UPDATE_SNAPSHOTS") == "1":
+        SNAPSHOTS_DIR.mkdir(exist_ok=True)
+        snapshot.write_text(json.dumps(actual, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    assert snapshot.exists(), f"Missing {snapshot.name}; run with UPDATE_SNAPSHOTS=1 to create it"
+    assert actual == json.loads(snapshot.read_text(encoding="utf-8"))
