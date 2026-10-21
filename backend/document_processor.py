@@ -1,6 +1,6 @@
 import os
 import re
-from typing import List, Optional, Tuple
+from typing import Iterator, List, Optional, Tuple
 from models import Course, Lesson, CourseChunk
 
 # Sentence boundary: whitespace after . ! or ? that is followed by a capital
@@ -112,15 +112,45 @@ class DocumentProcessor:
         Following lines: Lesson markers and content
         """
         content = self.read_file(file_path)
-        filename = os.path.basename(file_path)
-        
         lines = content.strip().split('\n')
-        
+        course, body_start = self._parse_header(lines, fallback_title=os.path.basename(file_path))
+
+        course_chunks = []
+        chunk_counter = 0
+        for lesson_number, lesson_title, lesson_link, lesson_content in self._split_lessons(lines, body_start):
+            chunk_counter = self._add_lesson(course, course_chunks, chunk_counter,
+                                             lesson_number, lesson_title, lesson_link,
+                                             lesson_content)
+
+        # If no lessons found, treat entire content as one document
+        if not course_chunks and len(lines) > 2:
+            remaining_content = '\n'.join(lines[body_start:]).strip()
+            if remaining_content:
+                chunks = self.chunk_text(remaining_content)
+                for chunk in chunks:
+                    course_chunk = CourseChunk(
+                        content=chunk,
+                        course_title=course.title,
+                        chunk_index=chunk_counter
+                    )
+                    course_chunks.append(course_chunk)
+                    chunk_counter += 1
+
+        return course, course_chunks
+
+    @staticmethod
+    def _parse_header(lines: List[str], fallback_title: str) -> Tuple[Course, int]:
+        """
+        Parse the course metadata at the top of the document.
+
+        Returns:
+            Tuple of (Course without lessons, index of the first body line)
+        """
         # Extract course metadata from first three lines
-        course_title = filename  # Default fallback
+        course_title = fallback_title  # Default fallback
         course_link = None
         instructor_name = "Unknown"
-        
+
         # Parse course title from first line
         if len(lines) >= 1 and lines[0].strip():
             title_match = re.match(r'^Course Title:\s*(.+)$', lines[0].strip(), re.IGNORECASE)
@@ -153,70 +183,38 @@ class DocumentProcessor:
             course_link=course_link,
             instructor=instructor_name if instructor_name != "Unknown" else None
         )
-        
-        # Process lessons and create chunks
-        course_chunks = []
-        current_lesson = None
-        lesson_title = None
-        lesson_link = None
-        lesson_content = []
-        chunk_counter = 0
-        
-        # Start processing from line 4 (after metadata)
-        start_index = 3
+
+        # The body is assumed to start at line 4 (after metadata), regardless
+        # of how many header lines were actually found
+        body_start = 3
         if len(lines) > 3 and not lines[3].strip():
-            start_index = 4  # Skip empty line after instructor
-        
-        i = start_index
-        while i < len(lines):
-            line = lines[i]
-            
-            # Check for lesson markers (e.g., "Lesson 0: Introduction")
-            lesson_match = re.match(r'^Lesson\s+(\d+):\s*(.+)$', line.strip(), re.IGNORECASE)
-            
-            if lesson_match:
-                # Process previous lesson if it exists
-                chunk_counter = self._add_lesson(course, course_chunks, chunk_counter,
-                                                 current_lesson, lesson_title, lesson_link,
-                                                 lesson_content)
+            body_start = 4  # Skip empty line after instructor
 
-                # Start new lesson
-                current_lesson = int(lesson_match.group(1))
-                lesson_title = lesson_match.group(2).strip()
-                lesson_link = None
-                
-                # Check if next line is a lesson link
-                if i + 1 < len(lines):
-                    next_line = lines[i + 1].strip()
-                    link_match = re.match(r'^Lesson Link:\s*(.+)$', next_line, re.IGNORECASE)
-                    if link_match:
-                        lesson_link = link_match.group(1).strip()
-                        i += 1  # Skip the link line so it's not added to content
-                
-                lesson_content = []
-            else:
-                # Add line to current lesson content
-                lesson_content.append(line)
-                
-            i += 1
-        
-        # Process the last lesson
-        chunk_counter = self._add_lesson(course, course_chunks, chunk_counter,
-                                         current_lesson, lesson_title, lesson_link,
-                                         lesson_content)
+        return course, body_start
 
-        # If no lessons found, treat entire content as one document
-        if not course_chunks and len(lines) > 2:
-            remaining_content = '\n'.join(lines[start_index:]).strip()
-            if remaining_content:
-                chunks = self.chunk_text(remaining_content)
-                for chunk in chunks:
-                    course_chunk = CourseChunk(
-                        content=chunk,
-                        course_title=course.title,
-                        chunk_index=chunk_counter
-                    )
-                    course_chunks.append(course_chunk)
-                    chunk_counter += 1
-        
-        return course, course_chunks
+    @staticmethod
+    def _split_lessons(lines: List[str], start: int) -> Iterator[Tuple[int, str, Optional[str], List[str]]]:
+        """
+        Split the document body into lessons. Text before the first lesson
+        marker is ignored.
+
+        Yields:
+            Tuples of (lesson number, lesson title, lesson link, content lines)
+        """
+        # Lesson markers, e.g. "Lesson 0: Introduction"
+        markers = [(i, match) for i in range(start, len(lines))
+                   if (match := re.match(r'^Lesson\s+(\d+):\s*(.+)$', lines[i].strip(), re.IGNORECASE))]
+        for k, (marker_index, lesson_match) in enumerate(markers):
+            end = markers[k + 1][0] if k + 1 < len(markers) else len(lines)
+
+            # An optional "Lesson Link:" line directly follows the marker
+            content_start = marker_index + 1
+            lesson_link = None
+            if content_start < end:
+                link_match = re.match(r'^Lesson Link:\s*(.+)$', lines[content_start].strip(), re.IGNORECASE)
+                if link_match:
+                    lesson_link = link_match.group(1).strip()
+                    content_start += 1
+
+            yield (int(lesson_match.group(1)), lesson_match.group(2).strip(), lesson_link,
+                   lines[content_start:end])
