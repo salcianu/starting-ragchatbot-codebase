@@ -14,7 +14,7 @@ A RAG chatbot that answers questions about course materials. It is a FastAPI bac
   - Web UI: http://localhost:8000. API docs: http://localhost:8000/docs
 
 - Tests (pytest is a dev dependency; config lives in `pyproject.toml`): run `uv run pytest` from the repo root. For a single test: `uv run pytest backend/tests/test_document_processor.py::TestChunkText::test_whitespace_is_normalized`
-  - `backend/tests/test_document_processor.py` holds characterization tests. Tests named `pinned_quirk` lock in current behavior that is probably a bug. Update them on purpose when fixing that behavior.
+  - `backend/tests/test_document_processor.py` holds unit tests plus golden snapshot tests. Known bugs that aren't fixed yet can be locked in by tests named `pinned_quirk` (none at the moment); update such tests on purpose in the same change that fixes the bug.
   - Golden snapshots of the parsed `docs/*.txt` are stored in `backend/tests/snapshots/`. After an *intentional* change to parsing or chunking output, regenerate them with `UPDATE_SNAPSHOTS=1 uv run pytest`.
 
 The repo has no linter or build step. The root `main.py` is an unused placeholder.
@@ -32,7 +32,10 @@ The flow for a single request is `app.py` → `RAGSystem` (`rag_system.py`) → 
   - `course_content`: text chunks with `course_title`, `lesson_number` and `chunk_index` metadata. `search()` first resolves the course name, then filters content with a `where` clause.
 - **Course title is the primary key everywhere.** Chunk IDs are `{title_with_underscores}_{chunk_index}`.
 - **Ingestion happens on startup** (`app.py` `startup_event` calls `add_course_folder("../docs", clear_existing=False)`). It skips any course whose title already exists in Chroma, so edits to an existing doc are *not* re-indexed. To pick up changes, delete `backend/chroma_db` or call `add_course_folder(..., clear_existing=True)`.
-- **Document format** (parsed by `document_processor.py`): the first lines are `Course Title:`, `Course Link:` and `Course Instructor:`. After those, each `Lesson N: <title>` marker can be followed by a `Lesson Link:` line, then the lesson text. Chunks are built from sentences (`CHUNK_SIZE` 800 chars, `CHUNK_OVERLAP` 100). Note: the context prefix added to chunks is inconsistent. For most lessons only the first chunk gets the `Lesson N content:` prefix. For the *last* lesson, every chunk gets `Course <title> Lesson N content:`. `.pdf` and `.docx` files are accepted by extension but are read as plain UTF-8 text.
+- **Document format** (parsed by `document_processor.py`): the first line is the title (`Course Title:` label optional). It is followed by optional `Course Link:` / `Course Instructor:` lines, in any order, possibly with blank lines. The body starts at the first other line. In the body, each `Lesson N: <title>` marker can be followed by a `Lesson Link:` line, then the lesson text; text before the first marker is ignored.
+  - Chunks are built from sentences (`CHUNK_SIZE` 800 chars, `CHUNK_OVERLAP` 100). Every lesson chunk is prefixed `Course <title> Lesson <N> content: `, and that prefix is embedded along with the text.
+  - A document with no lesson markers is chunked as a whole, with the prefix `Course <title> content: ` and `lesson_number=None`.
+  - `.pdf` and `.docx` files are accepted by extension but are read as plain UTF-8 text.
 - **Sessions** (`session_manager.py`) live in memory only and are lost on restart. History is capped at `MAX_HISTORY` exchanges and is injected into the *system prompt* as formatted text, not as message turns.
 - **Configuration** is in `backend/config.py`: the model, chunking, `MAX_RESULTS`, `MAX_HISTORY` and the DB path. The model is `claude-sonnet-5-5`. Its generation settings are in `AIGenerator.base_params`.
 - **Sonnet 5.5 constraints** (`ai_generator.py`):
