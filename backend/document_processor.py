@@ -7,6 +7,13 @@ from models import Course, Lesson, CourseChunk
 # letter, except after abbreviations like "e.g." or "Dr."
 SENTENCE_ENDINGS = re.compile(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\!|\?)\s+(?=[A-Z])')
 
+# Document header and lesson markers (matched against stripped lines)
+COURSE_TITLE = re.compile(r'^Course Title:\s*(.+)$', re.IGNORECASE)
+COURSE_LINK = re.compile(r'^Course Link:\s*(.+)$', re.IGNORECASE)
+COURSE_INSTRUCTOR = re.compile(r'^Course Instructor:\s*(.+)$', re.IGNORECASE)
+LESSON_MARKER = re.compile(r'^Lesson\s+(\d+):\s*(.+)$', re.IGNORECASE)  # e.g. "Lesson 0: Introduction"
+LESSON_LINK = re.compile(r'^Lesson Link:\s*(.+)$', re.IGNORECASE)
+
 class DocumentProcessor:
     """Processes course documents and extracts structured information"""
     
@@ -128,42 +135,29 @@ class DocumentProcessor:
         Returns:
             Tuple of (Course without lessons, index of the first body line)
         """
-        # Extract course metadata from first three lines
-        course_title = fallback_title  # Default fallback
-        course_link = None
-        instructor_name = "Unknown"
+        # Line 0 holds the title, with or without a "Course Title:" label
+        course_title = fallback_title
+        first_line = lines[0].strip()
+        if first_line:
+            title_match = COURSE_TITLE.match(first_line)
+            course_title = title_match.group(1).strip() if title_match else first_line
 
-        # Parse course title from first line
-        if len(lines) >= 1 and lines[0].strip():
-            title_match = re.match(r'^Course Title:\s*(.+)$', lines[0].strip(), re.IGNORECASE)
-            if title_match:
-                course_title = title_match.group(1).strip()
-            else:
-                course_title = lines[0].strip()
-        
-        # Parse remaining lines for course metadata
-        for i in range(1, min(len(lines), 4)):  # Check first 4 lines for metadata
-            line = lines[i].strip()
-            if not line:
-                continue
-                
-            # Try to match course link
-            link_match = re.match(r'^Course Link:\s*(.+)$', line, re.IGNORECASE)
-            if link_match:
+        # Lines 1-3 may hold the course link and the instructor, in any order
+        course_link = None
+        instructor_name = None
+        for line in lines[1:4]:
+            line = line.strip()
+            if link_match := COURSE_LINK.match(line):
                 course_link = link_match.group(1).strip()
-                continue
-                
-            # Try to match instructor
-            instructor_match = re.match(r'^Course Instructor:\s*(.+)$', line, re.IGNORECASE)
-            if instructor_match:
+            elif instructor_match := COURSE_INSTRUCTOR.match(line):
                 instructor_name = instructor_match.group(1).strip()
-                continue
-        
-        # Create course object with title as ID
+
+        # Create course object with title as ID; an instructor given
+        # literally as "Unknown" is treated as missing
         course = Course(
             title=course_title,
             course_link=course_link,
-            instructor=instructor_name if instructor_name != "Unknown" else None
+            instructor=None if instructor_name == "Unknown" else instructor_name
         )
 
         # The body is assumed to start at line 4 (after metadata), regardless
@@ -183,9 +177,8 @@ class DocumentProcessor:
         Yields:
             Tuples of (lesson number, lesson title, lesson link, content lines)
         """
-        # Lesson markers, e.g. "Lesson 0: Introduction"
         markers = [(i, match) for i in range(start, len(lines))
-                   if (match := re.match(r'^Lesson\s+(\d+):\s*(.+)$', lines[i].strip(), re.IGNORECASE))]
+                   if (match := LESSON_MARKER.match(lines[i].strip()))]
         for k, (marker_index, lesson_match) in enumerate(markers):
             end = markers[k + 1][0] if k + 1 < len(markers) else len(lines)
 
@@ -193,7 +186,7 @@ class DocumentProcessor:
             content_start = marker_index + 1
             lesson_link = None
             if content_start < end:
-                link_match = re.match(r'^Lesson Link:\s*(.+)$', lines[content_start].strip(), re.IGNORECASE)
+                link_match = LESSON_LINK.match(lines[content_start].strip())
                 if link_match:
                     lesson_link = link_match.group(1).strip()
                     content_start += 1
