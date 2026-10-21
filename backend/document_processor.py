@@ -3,6 +3,10 @@ import re
 from typing import List, Optional, Tuple
 from models import Course, Lesson, CourseChunk
 
+# Sentence boundary: whitespace after . ! or ? that is followed by a capital
+# letter, except after abbreviations like "e.g." or "Dr."
+SENTENCE_ENDINGS = re.compile(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\!|\?)\s+(?=[A-Z])')
+
 class DocumentProcessor:
     """Processes course documents and extracts structured information"""
     
@@ -22,71 +26,50 @@ class DocumentProcessor:
     
     def chunk_text(self, text: str) -> List[str]:
         """Split text into sentence-based chunks with overlap using config settings"""
-        
-        # Clean up the text
-        text = re.sub(r'\s+', ' ', text.strip())  # Normalize whitespace
-        
-        # Better sentence splitting that handles abbreviations
-        # This regex looks for periods followed by whitespace and capital letters
-        # but ignores common abbreviations
-        sentence_endings = re.compile(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\!|\?)\s+(?=[A-Z])')
-        sentences = sentence_endings.split(text)
-        
-        # Clean sentences
-        sentences = [s.strip() for s in sentences if s.strip()]
-        
+        sentences = self._split_sentences(text)
         chunks = []
-        i = 0
-        
-        while i < len(sentences):
-            current_chunk = []
-            current_size = 0
-            
-            # Build chunk starting from sentence i
-            for j in range(i, len(sentences)):
-                sentence = sentences[j]
-                
-                # Calculate size with space
-                space_size = 1 if current_chunk else 0
-                total_addition = len(sentence) + space_size
-                
-                # Check if adding this sentence would exceed chunk size
-                if current_size + total_addition > self.chunk_size and current_chunk:
-                    break
-                
-                current_chunk.append(sentence)
-                current_size += total_addition
-            
-            # Add chunk if we have content
-            if current_chunk:
-                chunks.append(' '.join(current_chunk))
-                
-                # Calculate overlap for next chunk
-                if hasattr(self, 'chunk_overlap') and self.chunk_overlap > 0:
-                    # Find how many sentences to overlap
-                    overlap_size = 0
-                    overlap_sentences = 0
-                    
-                    # Count backwards from end of current chunk
-                    for k in range(len(current_chunk) - 1, -1, -1):
-                        sentence_len = len(current_chunk[k]) + (1 if k < len(current_chunk) - 1 else 0)
-                        if overlap_size + sentence_len <= self.chunk_overlap:
-                            overlap_size += sentence_len
-                            overlap_sentences += 1
-                        else:
-                            break
-                    
-                    # Move start position considering overlap
-                    next_start = i + len(current_chunk) - overlap_sentences
-                    i = max(next_start, i + 1)  # Ensure we make progress
-                else:
-                    # No overlap - move to next sentence after current chunk
-                    i += len(current_chunk)
-            else:
-                # No sentences fit, move to next
-                i += 1
-        
+        start = 0
+        while start < len(sentences):
+            end = self._fill_chunk(sentences, start)
+            chunk_sentences = sentences[start:end]
+            chunks.append(' '.join(chunk_sentences))
+            # Next chunk starts with the overlap sentences, but always moves forward
+            start = max(end - self._overlap_count(chunk_sentences), start + 1)
         return chunks
+
+    @staticmethod
+    def _split_sentences(text: str) -> List[str]:
+        """Normalize whitespace and split text into non-empty sentences"""
+        text = re.sub(r'\s+', ' ', text.strip())
+        return [s.strip() for s in SENTENCE_ENDINGS.split(text) if s.strip()]
+
+    def _fill_chunk(self, sentences: List[str], start: int) -> int:
+        """
+        Greedily add sentences, starting at sentences[start], while the joined
+        chunk fits in chunk_size. The first sentence is always taken, even if
+        it alone exceeds chunk_size.
+
+        Returns:
+            The index just past the last sentence in the chunk
+        """
+        size = len(sentences[start])
+        end = start + 1
+        while end < len(sentences) and size + 1 + len(sentences[end]) <= self.chunk_size:
+            size += 1 + len(sentences[end])  # +1 for the joining space
+            end += 1
+        return end
+
+    def _overlap_count(self, chunk_sentences: List[str]) -> int:
+        """Number of trailing sentences of a chunk that fit in chunk_overlap"""
+        overlap_size = 0
+        count = 0
+        for sentence in reversed(chunk_sentences):
+            sentence_len = len(sentence) + (1 if count > 0 else 0)  # +1 for the joining space
+            if overlap_size + sentence_len > self.chunk_overlap:
+                break
+            overlap_size += sentence_len
+            count += 1
+        return count
 
     def _add_lesson(self, course: Course, course_chunks: List[CourseChunk], chunk_counter: int,
                     lesson_number: Optional[int], lesson_title: Optional[str],
