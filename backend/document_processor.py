@@ -40,6 +40,8 @@ class DocumentProcessor:
             end = self._fill_chunk(sentences, start)
             chunk_sentences = sentences[start:end]
             chunks.append(' '.join(chunk_sentences))
+            if end == len(sentences):
+                break  # Reached the end; the overlap is already in this chunk
             # Next chunk starts with the overlap sentences, but always moves forward
             start = max(end - self._overlap_count(chunk_sentences), start + 1)
         return chunks
