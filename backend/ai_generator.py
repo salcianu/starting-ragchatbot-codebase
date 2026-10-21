@@ -33,12 +33,25 @@ Provide only the direct answer to what was asked.
         self.client = anthropic.Anthropic(api_key=api_key)
         self.model = model
         
-        # Pre-build base API parameters
+        # Pre-build base API parameters. Sonnet 5.5 always thinks (adaptive) and
+        # rejects non-default temperature; thinking counts toward max_tokens.
         self.base_params = {
             "model": self.model,
-            "temperature": 0,
-            "max_tokens": 800
+            "max_tokens": 16000,
+            # Fields newer than the pinned SDK version are sent via extra_*
+            "extra_body": {
+                "output_config": {"effort": "low"},
+                "fallbacks": "default"  # server-side retry on another model if refused
+            },
+            "extra_headers": {"anthropic-beta": "server-side-fallback-2026-07-01"}
         }
+
+    @staticmethod
+    def _extract_text(response) -> str:
+        """Return the answer text; responses may start with thinking blocks"""
+        if response.stop_reason == "refusal":
+            return "Sorry, I can't help with that request."
+        return "".join(block.text for block in response.content if block.type == "text")
     
     def generate_response(self, query: str,
                          conversation_history: Optional[str] = None,
@@ -84,7 +97,7 @@ Provide only the direct answer to what was asked.
             return self._handle_tool_execution(response, api_params, tool_manager)
         
         # Return direct response
-        return response.content[0].text
+        return self._extract_text(response)
     
     def _handle_tool_execution(self, initial_response, base_params: Dict[str, Any], tool_manager):
         """
@@ -123,13 +136,17 @@ Provide only the direct answer to what was asked.
         if tool_results:
             messages.append({"role": "user", "content": tool_results})
         
-        # Prepare final API call without tools
+        # Prepare final API call. Tools must stay identical to the first call (the
+        # replayed thinking blocks are rejected if they change); tool_choice "none"
+        # prevents a second round of searches.
         final_params = {
             **self.base_params,
             "messages": messages,
-            "system": base_params["system"]
+            "system": base_params["system"],
+            "tools": base_params["tools"],
+            "tool_choice": {"type": "none"}
         }
-        
+
         # Get final response
         final_response = self.client.messages.create(**final_params)
-        return final_response.content[0].text
+        return self._extract_text(final_response)
