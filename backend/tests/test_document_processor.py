@@ -227,15 +227,38 @@ class TestProcessCourseDocument:
             ("Just text. More text.", None, 0),
         ]
 
-    def test_pinned_quirk_body_starts_at_fixed_line(self, tmp_path):
-        # PINNED QUIRK: the body is assumed to start at line index 3 (or 4 after a
-        # blank line), regardless of how many header lines there really are.
-        # With a 2-line header, the "Lesson 1: A" marker on line 2 is skipped,
-        # so the lesson is lost and its text goes through the no-lessons fallback.
+    def test_body_starts_after_actual_header(self, tmp_path):
+        # With a 2-line header, the "Lesson 1: A" marker on line 2 is part of the body
         doc = "Course Title: T\nCourse Instructor: I\nLesson 1: A\nBody one.\n"
         course, chunks = DocumentProcessor(800, 100).process_course_document(write_doc(tmp_path, doc))
-        assert course.lessons == []
-        assert [(c.content, c.lesson_number) for c in chunks] == [("Body one.", None)]
+        assert course.instructor == "I"
+        assert [(l.lesson_number, l.title) for l in course.lessons] == [(1, "A")]
+        assert [(c.content, c.lesson_number) for c in chunks] == [("Course T Lesson 1 content: Body one.", 1)]
+
+    def test_title_only_header(self, tmp_path):
+        doc = "Course Title: T\nLesson 1: A\nBody one.\n"
+        course, chunks = DocumentProcessor(800, 100).process_course_document(write_doc(tmp_path, doc))
+        assert (course.title, course.course_link, course.instructor) == ("T", None, None)
+        assert [c.content for c in chunks] == ["Course T Lesson 1 content: Body one."]
+
+    def test_header_fields_in_any_order_with_blank_lines(self, tmp_path):
+        doc = "Course Title: T\n\nCourse Instructor: I\n\n\nCourse Link: L\nLesson 1: A\nBody one.\n"
+        course, _ = DocumentProcessor(800, 100).process_course_document(write_doc(tmp_path, doc))
+        assert (course.course_link, course.instructor) == ("L", "I")
+        assert [l.lesson_number for l in course.lessons] == [1]
+
+    def test_text_after_header_is_body(self, tmp_path):
+        # A non-header line right after the title is body text: ignored before
+        # the first lesson marker...
+        doc = "Course Title: T\nA short description.\nLesson 1: A\nBody one.\n"
+        course, chunks = DocumentProcessor(800, 100).process_course_document(write_doc(tmp_path, doc))
+        assert [c.content for c in chunks] == ["Course T Lesson 1 content: Body one."]
+        # ...but kept when the document has no lesson markers, even if it is
+        # only two lines long
+        course, chunks = DocumentProcessor(800, 100).process_course_document(
+            write_doc(tmp_path, "My Title\nSome text here."))
+        assert course.title == "My Title"
+        assert [(c.content, c.lesson_number) for c in chunks] == [("Some text here.", None)]
 
 
 # ---------------------------------------------------------------------------
