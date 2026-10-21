@@ -217,14 +217,14 @@ class TestProcessCourseDocument:
         assert [l.lesson_number for l in course.lessons] == [2]
         assert [c.content for c in chunks] == ["Course T Lesson 2 content: Hello."]
 
-    def test_pinned_quirk_no_lessons_fallback_has_no_prefix(self, tmp_path):
-        # PINNED QUIRK: without "Lesson N:" markers, chunks get no prefix and no
-        # lesson number.
+    def test_no_lessons_fallback_is_prefixed(self, tmp_path):
+        # Without "Lesson N:" markers, the whole body is chunked; chunks carry the
+        # course title in their prefix but have no lesson number
         doc = "Course Title: T\nCourse Link: L\nCourse Instructor: I\n\nJust text. More text.\n"
         course, chunks = DocumentProcessor(800, 100).process_course_document(write_doc(tmp_path, doc))
         assert course.lessons == []
         assert [(c.content, c.lesson_number, c.chunk_index) for c in chunks] == [
-            ("Just text. More text.", None, 0),
+            ("Course T content: Just text. More text.", None, 0),
         ]
 
     def test_body_starts_after_actual_header(self, tmp_path):
@@ -258,7 +258,7 @@ class TestProcessCourseDocument:
         course, chunks = DocumentProcessor(800, 100).process_course_document(
             write_doc(tmp_path, "My Title\nSome text here."))
         assert course.title == "My Title"
-        assert [(c.content, c.lesson_number) for c in chunks] == [("Some text here.", None)]
+        assert [(c.content, c.lesson_number) for c in chunks] == [("Course My Title content: Some text here.", None)]
 
 
 # ---------------------------------------------------------------------------
