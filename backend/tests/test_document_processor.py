@@ -74,29 +74,30 @@ class TestChunkText:
             "Four five. Six seven eight. Nine ten.",
         ]
 
-    def test_pinned_quirk_redundant_tail_chunk(self):
-        # PINNED QUIRK: after the chunk that reaches the end of the text, the loop
-        # emits one more chunk made only of the overlap sentences, which are
-        # already contained in the previous chunk.
+    def test_no_redundant_tail_chunk(self):
+        # Chunking stops at the chunk that reaches the end of the text; it does not
+        # emit an extra chunk made only of overlap sentences it already contains.
         dp = DocumentProcessor(40, 15)
         chunks = dp.chunk_text("One two three. Four five. Six seven eight. Nine ten.")
         assert chunks == [
             "One two three. Four five.",
             "Four five. Six seven eight. Nine ten.",
-            "Nine ten.",
         ]
         assert DocumentProcessor(30, 12).chunk_text("Aa bb. Cc dd. Ee ff gg hh. Ii.") == [
             "Aa bb. Cc dd. Ee ff gg hh. Ii.",
-            "Ii.",
         ]
-        # Even a text far below chunk_size gets a tail chunk when its last
-        # sentence fits in the overlap...
+        # A text that fits in one chunk stays one chunk, even with overlap on
         assert DocumentProcessor(1000, 100).chunk_text("First sentence. Second sentence.") == [
             "First sentence. Second sentence.",
-            "Second sentence.",
         ]
-        # ...but a single-sentence text does not.
         assert DocumentProcessor(1000, 100).chunk_text("Only one sentence.") == ["Only one sentence."]
+
+    def test_no_chunk_is_contained_in_the_previous_one(self):
+        dp = DocumentProcessor(800, 100)
+        text = (DOCS_DIR / "course1_script.txt").read_text(encoding="utf-8")
+        chunks = dp.chunk_text(text)
+        assert len(chunks) > 1
+        assert not any(prev.endswith(chunk) for prev, chunk in zip(chunks, chunks[1:]))
 
     def test_no_overlap_chunks_rejoin_to_original(self):
         dp = DocumentProcessor(60, 0)
@@ -148,10 +149,8 @@ class TestProcessCourseDocument:
 
     @pytest.fixture
     def parsed(self, tmp_path):
-        # Overlap 0 keeps these tests focused on parsing; with overlap on, every
-        # multi-sentence lesson would also get a redundant tail chunk (see
-        # TestChunkText.test_pinned_quirk_redundant_tail_chunk).
-        return DocumentProcessor(800, 0).process_course_document(write_doc(tmp_path, FULL_DOC))
+        # Same settings as config.py (CHUNK_SIZE=800, CHUNK_OVERLAP=100)
+        return DocumentProcessor(800, 100).process_course_document(write_doc(tmp_path, FULL_DOC))
 
     def test_header_is_parsed(self, parsed):
         course, _ = parsed
@@ -220,13 +219,12 @@ class TestProcessCourseDocument:
 
     def test_pinned_quirk_no_lessons_fallback_has_no_prefix(self, tmp_path):
         # PINNED QUIRK: without "Lesson N:" markers, chunks get no prefix and no
-        # lesson number (and also show the redundant tail chunk from chunk_text).
+        # lesson number.
         doc = "Course Title: T\nCourse Link: L\nCourse Instructor: I\n\nJust text. More text.\n"
         course, chunks = DocumentProcessor(800, 100).process_course_document(write_doc(tmp_path, doc))
         assert course.lessons == []
         assert [(c.content, c.lesson_number, c.chunk_index) for c in chunks] == [
             ("Just text. More text.", None, 0),
-            ("More text.", None, 1),
         ]
 
     def test_pinned_quirk_body_starts_at_fixed_line(self, tmp_path):
