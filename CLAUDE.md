@@ -17,7 +17,7 @@ A RAG chatbot that answers questions about course materials. It is a FastAPI bac
   - `backend/tests/test_document_processor.py` holds unit tests plus golden snapshot tests. Known bugs that aren't fixed yet can be locked in by tests named `pinned_quirk` (none at the moment); update such tests on purpose in the same change that fixes the bug.
   - Golden snapshots of the parsed `docs/*.txt` are stored in `backend/tests/snapshots/`. After an *intentional* change to parsing or chunking output, regenerate them with `UPDATE_SNAPSHOTS=1 uv run pytest`.
 
-The repo has no linter or build step. The root `main.py` is an unused placeholder.
+The repo has no linter or build step.
 
 **Run the server from inside `backend/`.** The code uses paths relative to the working directory: `../docs` for documents, `../frontend` for static files, and `./chroma_db` for the vector DB (so the DB lives at `backend/chroma_db`).
 
