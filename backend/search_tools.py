@@ -22,7 +22,7 @@ class CourseSearchTool(Tool):
     
     def __init__(self, vector_store: VectorStore):
         self.store = vector_store
-        self.last_sources = []  # Track sources from last search
+        self.last_sources = []  # Track sources from the searches of the current query
     
     def get_tool_definition(self) -> Dict[str, Any]:
         """Return Anthropic tool definition for this tool"""
@@ -108,8 +108,8 @@ class CourseSearchTool(Tool):
             
             formatted.append(f"{header}\n{doc}")
         
-        # Store sources for retrieval
-        self.last_sources = sources
+        # Accumulate sources across searches; RAGSystem.query resets them per query
+        self.last_sources.extend(sources)
         
         return "\n\n".join(formatted)
 
