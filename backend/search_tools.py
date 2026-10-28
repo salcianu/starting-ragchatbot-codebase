@@ -113,6 +113,7 @@ class CourseSearchTool(Tool):
         
         return "\n\n".join(formatted)
 
+
 class ToolManager:
     """Manages available tools for the AI"""
     
@@ -127,7 +128,6 @@ class ToolManager:
             raise ValueError("Tool must have a 'name' in its definition")
         self.tools[tool_name] = tool
 
-    
     def get_tool_definitions(self) -> list:
         """Get all tool definitions for Anthropic tool calling"""
         return [tool.get_tool_definition() for tool in self.tools.values()]

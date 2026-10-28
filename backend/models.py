@@ -1,11 +1,13 @@
 from typing import List, Dict, Optional
 from pydantic import BaseModel
 
+
 class Lesson(BaseModel):
     """Represents a lesson within a course"""
     lesson_number: int  # Sequential lesson number (1, 2, 3, etc.)
     title: str         # Lesson title
     lesson_link: Optional[str] = None  # URL link to the lesson
+
 
 class Course(BaseModel):
     """Represents a complete course with its lessons"""
@@ -13,6 +15,7 @@ class Course(BaseModel):
     course_link: Optional[str] = None  # URL link to the course
     instructor: Optional[str] = None  # Course instructor name (optional metadata)
     lessons: List[Lesson] = [] # List of lessons in this course
+
 
 class CourseChunk(BaseModel):
     """Represents a text chunk from a course for vector storage"""

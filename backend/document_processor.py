@@ -14,6 +14,7 @@ COURSE_INSTRUCTOR = re.compile(r'^Course Instructor:\s*(.+)$', re.IGNORECASE)
 LESSON_MARKER = re.compile(r'^Lesson\s+(\d+):\s*(.+)$', re.IGNORECASE)  # e.g. "Lesson 0: Introduction"
 LESSON_LINK = re.compile(r'^Lesson Link:\s*(.+)$', re.IGNORECASE)
 
+
 class DocumentProcessor:
     """Processes course documents and extracts structured information"""
     

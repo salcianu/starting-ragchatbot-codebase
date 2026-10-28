@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
+
 @dataclass
 class Config:
     """Configuration settings for the RAG system"""
@@ -23,6 +24,7 @@ class Config:
     
     # Database paths
     CHROMA_PATH: str = "./chroma_db"  # ChromaDB storage location
+
 
 config = Config()
 

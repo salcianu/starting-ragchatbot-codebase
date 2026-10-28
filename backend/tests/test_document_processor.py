@@ -31,6 +31,7 @@ def write_doc(tmp_path: Path, text: str, name: str = "course.txt") -> str:
 # chunk_text
 # ---------------------------------------------------------------------------
 
+
 class TestChunkText:
 
     def test_empty_and_whitespace_only_text(self):
@@ -120,6 +121,7 @@ class TestChunkText:
 # read_file
 # ---------------------------------------------------------------------------
 
+
 def test_read_file_drops_invalid_utf8_bytes(tmp_path):
     path = tmp_path / "bad.txt"
     path.write_bytes(b"Course Title: Caf\xe9\n")
@@ -129,6 +131,7 @@ def test_read_file_drops_invalid_utf8_bytes(tmp_path):
 # ---------------------------------------------------------------------------
 # process_course_document
 # ---------------------------------------------------------------------------
+
 
 FULL_DOC = """Course Title: Test Course
 Course Link: https://example.com/course
@@ -266,6 +269,7 @@ class TestProcessCourseDocument:
 # ---------------------------------------------------------------------------
 # Golden snapshots of the real course documents
 # ---------------------------------------------------------------------------
+
 
 def serialize(course, chunks) -> dict:
     return {

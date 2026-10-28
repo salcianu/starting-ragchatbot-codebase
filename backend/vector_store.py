@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from models import Course, CourseChunk
 from sentence_transformers import SentenceTransformer
 
+
 @dataclass
 class SearchResults:
     """Container for search results with metadata"""
@@ -30,6 +31,7 @@ class SearchResults:
     def is_empty(self) -> bool:
         """Check if results are empty"""
         return len(self.documents) == 0
+
 
 class VectorStore:
     """Vector storage using ChromaDB for course content and metadata"""

@@ -1,11 +1,13 @@
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 
+
 @dataclass
 class Message:
     """Represents a single message in a conversation"""
     role: str     # "user" or "assistant"
     content: str  # The message content
+
 
 class SessionManager:
     """Manages conversation sessions and message history"""

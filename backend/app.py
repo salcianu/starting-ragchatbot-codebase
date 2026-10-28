@@ -34,11 +34,13 @@ app.add_middleware(
 # Initialize RAG system
 rag_system = RAGSystem(config)
 
+
 # Pydantic models for request/response
 class QueryRequest(BaseModel):
     """Request model for course queries"""
     query: str
     session_id: Optional[str] = None
+
 
 class QueryResponse(BaseModel):
     """Response model for course queries"""
@@ -46,12 +48,14 @@ class QueryResponse(BaseModel):
     sources: List[str]
     session_id: str
 
+
 class CourseStats(BaseModel):
     """Response model for course statistics"""
     total_courses: int
     course_titles: List[str]
 
 # API Endpoints
+
 
 @app.post("/api/query", response_model=QueryResponse)
 async def query_documents(request: QueryRequest):
@@ -73,6 +77,7 @@ async def query_documents(request: QueryRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/api/courses", response_model=CourseStats)
 async def get_course_stats():
     """Get course analytics and statistics"""
@@ -85,6 +90,7 @@ async def get_course_stats():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.on_event("startup")
 async def startup_event():
     """Load initial documents on startup"""
@@ -96,6 +102,7 @@ async def startup_event():
             print(f"Loaded {courses} courses with {chunks} chunks")
         except Exception as e:
             print(f"Error loading documents: {e}")
+
 
 # Custom static file handler with no-cache headers for development
 from fastapi.staticfiles import StaticFiles
